@@ -1,8 +1,16 @@
+import os
+import utils
 import torch
-from dataloader import DataSet
+import datetime
+import argparse
+import transforms
+from datetime import datetime
+from MaskRcnn import MaskRCNN
 from torch.utils.data import DataLoader
+from coco_utils import train_one_epoch, evaluate
+from dataloader import Mask_DataSet, Faster_DataSet
+from FasterRcnn import resnet50_fpn_backbone, FasterRCNN, FastRCNNPredictor
 
-from MaskRcnn import resnet50_fpn_backbone, FasterRCNN, FastRCNNPredictor
 
 
 # 33
@@ -15,6 +23,7 @@ def create_model(num_classes, device):
                                      trainable_layers=3)
     # 训练自己数据集时不要修改这里的91，修改的是传入的num_classes参数
     model = FasterRCNN(backbone=backbone, num_classes=91)
+    # model = MaskRCNN(backbone=backbone, num_classes=91)
     # 载入预训练模型权重
     # https://download.pytorch.org/models/fasterrcnn_resnet50_fpn_coco-258fb6c6.pth
     weights_dict = torch.load(r"J:\Beijing\Sartorius\fasterrcnn_resnet50_fpn_coco.pth", map_location=device)
@@ -546,20 +555,47 @@ detectron2
 #
 #     return model
 
+def main(args):
+    results_file = "results{}.txt".format(datetime.now().strftime("%Y%m%d-%H%M%S"))
 
-if __name__ == "__main__":
-    annotations_file = "K:\\LiHang\\Cell Instance Segmentation\\train_3.csv"
-    img_root = "K:\\LiHang\\Cell Instance Segmentation\\train"
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_set = DataSet(annotations_file, img_root, img_shape=(520, 704))
+    # # Mask
+    # annotations_file = "K:\\LiHang\\Cell Instance Segmentation\\train_3.csv"
+    # img_root = "K:\\LiHang\\Cell Instance Segmentation\\train"
+    # train_set = Mask_DataSet(annotations_file, img_root, img_shape=(520, 704))
 
+    # Faster
+
+
+
+    file_root = args.data_path
+    train_annfile = os.path.join(file_root, "annotations", "instances_train2014.json")
+    val_annfile = os.path.join(file_root, "annotations", "instances_val2014.json")
+    data_transform = {
+        "train": transforms.Compose([transforms.ToTensor()]),
+        "val": transforms.Compose([transforms.ToTensor()])
+    }
+    train_set = Faster_DataSet(train_annfile, os.path.join(file_root, "coco", "train2014"), transform=data_transform["train"])
+    val_set = Faster_DataSet(val_annfile, os.path.join(file_root, "coco", "val2014"), transform=data_transform["val"])
+
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    batch_size = args.batch_size
     # 返回 index, items
     # 其中 index 是索引，items 包含了[imgs, target]
     # imgs: [batch_size, img_size, img_size, 3]
     # target: [label, mask]，这里的信息可以在 class DataSet(Dataset) 里改变
-    train_dataloader = DataLoader(train_set, batch_size=2)
+    train_dataloader = DataLoader(train_set,
+                                  batch_size,
+                                  shuffle=True,
+                                  pin_memory=True,
+                                  collate_fn=Faster_DataSet.collate_fn)
+    val_dataloader = DataLoader(val_set,
+                                batch_size,
+                                shuffle=True,
+                                pin_memory=True,
+                                collate_fn=Faster_DataSet.collate_fn
+                                )
 
-    model = create_model(80, "cuda")
+    model = create_model(args.num_classes + 1, "cuda")
     model.to(device)
 
     # define optimizer
@@ -567,9 +603,90 @@ if __name__ == "__main__":
     optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
 
     # learning rate scheduler
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.33)
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                        milestones=[16, 22],
+                                                        gamma=0.1)
 
     train_loss = []
     learning_rate = []
     val_map = []
+
+    for epoch in range(args.start_epoch, args.epochs):
+        # train for one epoch, printing every 10 iterations
+        mean_loss, lr = train_one_epoch(model, optimizer, train_dataloader,
+                                              device=device, epoch=epoch,
+                                              print_freq=50, warmup=True)
+        train_loss.append(mean_loss.item())
+        learning_rate.append(lr)
+
+        # update the learning rate
+        lr_scheduler.step()
+
+        # evaluate on the test dataset
+        coco_info = evaluate(model, val_dataloader, device=device)
+
+        # write into txt
+        with open(results_file, "a") as f:
+            # 写入的数据包括coco指标还有loss和learning rate
+            result_info = [str(round(i, 4)) for i in coco_info + [mean_loss.item()]] + [str(round(lr, 6))]
+            txt = "epoch:{} {}".format(epoch, '  '.join(result_info))
+            f.write(txt + "\n")
+
+        val_map.append(coco_info[1])  # pascal mAP
+
+        # save weights
+        save_files = {
+            'model': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'lr_scheduler': lr_scheduler.state_dict(),
+            'epoch': epoch}
+        torch.save(save_files, "./save_weights/resNetFpn-model-{}.pth".format(epoch))
+
+    # plot loss and lr curve
+    if len(train_loss) != 0 and len(learning_rate) != 0:
+        from .plot_curve import plot_loss_and_lr
+        plot_loss_and_lr(train_loss, learning_rate)
+
+    # plot mAP curve
+    if len(val_map) != 0:
+        from .plot_curve import plot_map
+        plot_map(val_map)
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(
+        description=__doc__)
+
+    # 训练设备类型
+    parser.add_argument('--device', default='cuda:0', help='device')
+    # 训练数据集的根目录(VOCdevkit)
+    parser.add_argument('--data-path', default=r"K:\Dataset\MS COCO 2014", help='dataset')
+    # 检测目标类别数(不包含背景)
+    parser.add_argument('--num-classes', default=80, type=int, help='num_classes')
+    # 文件保存地址
+    parser.add_argument('--output-dir', default='./save_weights', help='path where to save')
+    # 若需要接着上次训练，则指定上次训练保存权重文件地址
+    parser.add_argument('--resume', default='', type=str, help='resume from checkpoint')
+    # 指定接着从哪个epoch数开始训练
+    parser.add_argument('--start_epoch', default=0, type=int, help='start epoch')
+    # 训练的总epoch数
+    parser.add_argument('--epochs', default=15, type=int, metavar='N',
+                        help='number of total epochs to run')
+    # 训练的batch size
+    parser.add_argument('--batch_size', default=2, type=int, metavar='N',
+                        help='batch size when training.')
+
+    args = parser.parse_args()
+    print(args)
+
+    # 检查保存权重文件夹是否存在，不存在则创建
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+
+    main(args)
+
+
+
+
 

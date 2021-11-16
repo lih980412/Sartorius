@@ -3,6 +3,7 @@ import torch
 import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
+from pycocotools.coco import COCO
 from collections import OrderedDict
 from typing import List, Optional, Dict, Tuple
 
@@ -907,5 +908,16 @@ def resize_boxes(boxes, original_size, new_size):
     ymin = ymin * ratios_height
     ymax = ymax * ratios_height
     return torch.stack((xmin, ymin, xmax, ymax), dim=1)
+
+
+def _get_iou_types(model):
+    model_without_ddp = model
+    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        model_without_ddp = model.module
+    iou_types = ["bbox"]
+    return iou_types
+
+
+
 
 

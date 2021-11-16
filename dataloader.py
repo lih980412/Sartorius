@@ -1,12 +1,81 @@
+
 import os
 import cv2
+import json
+import torch
 import numpy as np
 import pandas as pd
-from torch.utils.data import Dataset, DataLoader
+from PIL import Image
+from coco_utils import COCO_CATEGORIES
+from pycocotools.coco import COCO
+from torch.utils.data import Dataset
 
 
-class DataSet(Dataset):
+
+
+
+class Faster_DataSet(Dataset):
     def __init__(self, annotations_file, img_dir, transform=None, target_transform=None, img_shape=None):
+        super(Faster_DataSet, self).__init__()
+        self.img_dir = img_dir
+        self.transform = transform  # 图片扩增
+        # self.target_transform = target_transform  # 标签处理
+        self.coco = COCO(annotations_file)
+
+        thing_ids = [k["id"] for k in COCO_CATEGORIES if k["isthing"] == 1]
+        assert len(thing_ids) == 80, len(thing_ids)
+        self.thing_dataset_id_to_contiguous_id = {k: i for i, k in enumerate(thing_ids)}
+        thing_classes = [k["name"] for k in COCO_CATEGORIES if k["isthing"] == 1]
+        ids = list(sorted(self.coco.imgs.keys()))
+        self.ids = ids
+
+    def __len__(self):
+        return len(self.ids)
+
+    def __getitem__(self, idx):
+
+        coco = self.coco
+        img_id = self.ids[idx]
+        ann_ids = coco.getAnnIds(imgIds=img_id)
+        coco_target = coco.loadAnns(ann_ids)
+        path = coco.loadImgs(img_id)[0]['file_name']
+        img = Image.open(os.path.join(self.img_dir, path)).convert('RGB')
+        w, h = img.size
+        anno = [obj for obj in coco_target if obj['iscrowd'] == 0]
+        boxes = []
+        for obj in anno:
+            if obj["bbox"][2] > 0 and obj["bbox"][3] > 0:
+                boxes.append(obj["bbox"])
+        boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
+        boxes[:, 2:] += boxes[:, :2]
+        if (w is not None) and (h is not None):
+            boxes[:, 0::2].clamp_(min=0, max=w)
+            boxes[:, 1::2].clamp_(min=0, max=h)
+
+        classes = [self.thing_dataset_id_to_contiguous_id[obj["category_id"]] for obj in anno]
+        classes = torch.tensor(classes, dtype=torch.int64)
+        target = {}
+        target["boxes"] = boxes
+        target["labels"] = classes
+        target["image_id"] = torch.tensor([img_id])
+        area = torch.tensor([obj["area"] for obj in anno])
+        iscrowd = torch.tensor([obj["iscrowd"] for obj in anno])
+        target["area"] = area
+        target["iscrowd"] = iscrowd
+        if self.transform is not None:
+            img, target = self.transform(img, target)
+
+        return img, target
+
+    @staticmethod
+    def collate_fn(batch):
+        return tuple(zip(*batch))
+
+
+
+class Mask_DataSet(Dataset):
+    def __init__(self, annotations_file, img_dir, transform=None, target_transform=None, img_shape=None):
+        super(Mask_DataSet, self).__init__()
         self.ann_file = pd.read_excel(annotations_file)
         self.img_dir = img_dir
         self.transform = transform  # 图片扩增
@@ -37,41 +106,6 @@ class DataSet(Dataset):
             img_input, target = self.transform(img_input, target)
 
         return img_input, target
-
-# class DataSet(Dataset):
-#     def __init__(self, annotations_file, img_dir, transform=None, target_transform=None, img_shape=None):
-#         self.ann_file = pd.read_excel(annotations_file)
-#         self.img_dir = img_dir
-#         self.transform = transform  # 图片
-#         self.target_transform = target_transform  # 标签
-#         self.img_shape = img_shape
-#
-#         self.unique_id = self.ann_file.id.unique().tolist()
-#
-#         img_path = os.path.join(self.img_dir, self.ann_file.iloc[idx, 0] + ".png") for idx in self.unique_id
-#
-#
-#     def __len__(self):
-#         return len(self.unique_id)
-#
-#     def __getitem__(self, idx):
-#
-#         mask = np.zeros(self.img_shape)
-#         labels = self.ann_file[self.ann_file["id"] == self.ann_file.iloc[idx, 0]]["annotation"].tolist()
-#         for label in labels:
-#             mask += rle_decode(label, self.img_shape)
-#         mask = mask.clip(0, 1)
-#
-#         cell_type = self.ann_file.iloc[idx, 4]
-#
-#         target = {}
-#         target["cell_type"] = cell_type
-#         target["mask"] = mask
-#
-#         if self.transform is not None:
-#             img_input, target = self.transform(img_input, target)
-#
-#         return img_input, target
 
 
 def rle_decode(mask_rle, shape, color=1):
