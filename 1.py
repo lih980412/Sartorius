@@ -127,19 +127,28 @@
 # # print(next(m))
 # # print(m.send(10))
 
-# 验证 Focal loss
+'''
+Focal loss
+'''
 import torch
 import numpy as np
 import torch.nn.functional as F
 from torch.autograd import Variable
 
 
-def cross_entropy_error(predict, target):
+# https://www.cnblogs.com/Henry-ZHAO/p/13087275.html
+# https://blog.csdn.net/wuliBob/article/details/104119616
+def cross_entropy_error(class_num, predict, target):
     delta = 1e-7
-    print(target * np.log(predict))
-    # return -np.sum(t * np.log(y + delta))
-    # print(-np.sum(t[0] * np.log(y[0] + delta)))
-    # print(-np.sum(t[1] * np.log(y[1] + delta)))
+    normal = len(target)
+    predict = F.softmax(predict, dim=1)
+    '''1'''
+    # target = F.one_hot(target, class_num)
+    # return format((-np.sum((target * np.log(predict + delta)).numpy()) / normal), '.4f')
+    # print(-(target * np.log(predict + delta)).numpy().sum(axis=1))
+    '''2'''
+    return F.nll_loss(np.log(predict + delta), target)
+
 
 def focal_loss(class_num, predict, target):
     alpha = Variable(torch.ones(class_num, 1))
@@ -148,23 +157,81 @@ def focal_loss(class_num, predict, target):
     pt = F.softmax(predict, dim=1)  # softmmax获取预测概率
     class_mask = F.one_hot(target, class_num)  # 获取target的one hot编码
     ids = target.view(-1, 1)
-    alpha = alpha[ids.data.view(-1)]  # 注意，这里的alpha是给定的一个list(tensor),里面的元素分别是每一个类的权重因子
+    alpha = alpha[ids.data.view(-1)].view(-1, 1)  # 注意，这里的alpha是给定的一个list(tensor),里面的元素分别是每一个类的权重因子
     probs = (pt * class_mask).sum(1).view(-1, 1)  # 利用onehot作为mask，提取对应的pt
     log_p = probs.log()
     # 同样，原始ce上增加一个动态权重衰减因子
     loss = -alpha * (torch.pow((1 - probs), gamma)) * log_p
-    print(loss)
+    # print(loss)
     if reduction == 'mean':
         loss = loss.mean()
     elif reduction == 'sum':
         loss = loss.sum()
-    # print(loss)
+    return loss
+
+# class FocalLoss(nn.Module):
+#     # Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)
+#     def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
+#         super(FocalLoss, self).__init__()
+#         self.loss_fcn = loss_fcn  # must be nn.BCEWithLogitsLoss()
+#         self.gamma = gamma
+#         self.alpha = alpha
+#         self.reduction = loss_fcn.reduction
+#         self.loss_fcn.reduction = 'none'  # required to apply FL to each element
+#
+#     def forward(self, pred, true):
+#         loss = self.loss_fcn(pred, true)
+#         # p_t = torch.exp(-loss)
+#         # loss *= self.alpha * (1.000001 - p_t) ** self.gamma  # non-zero power for gradient stability
+#
+#         # TF implementation https://github.com/tensorflow/addons/blob/v0.7.1/tensorflow_addons/losses/focal_loss.py
+#         pred_prob = torch.sigmoid(pred)  # prob from logits
+#         p_t = true * pred_prob + (1 - true) * (1 - pred_prob)
+#         alpha_factor = true * self.alpha + (1 - true) * (1 - self.alpha)
+#         modulating_factor = (1.0 - p_t) ** self.gamma
+#         loss *= alpha_factor * modulating_factor
+#
+#         if self.reduction == 'mean':
+#             return loss.mean()
+#         elif self.reduction == 'sum':
+#             return loss.sum()
+#         else:  # 'none'
+#             return loss
+
+
+
+
+def focal_loss1(class_num, predict, target):
+    eps = 1e-7
+    weight = 0.25
+    gamma = 2
+
+    class_mask = F.one_hot(target, class_num)
+    # y_pred = predict.view(predict.size()[0], predict.size()[1])  # B*C*H*W->B*C*(H*W)
+    y_pred = F.softmax(predict, dim=1)
+
+    target = class_mask.view(y_pred.size())  # B*C*H*W->B*C*(H*W)
+    ce = -1 * torch.log(y_pred + eps) * target
+    floss = torch.pow((1 - y_pred), gamma) * ce
+    floss = torch.mul(floss, weight)
+
+    floss = torch.sum(floss, dim=1)
+    # print(floss)
+    # print(torch.mean(floss))
+    return torch.mean(floss)
 
 
 if __name__ == "__main__":
-    predict = torch.tensor([[0.06, 0.03, 0.91], [0.08, 0.02, 0.9]])
-    target = torch.tensor([2, 2])
-    target1 = torch.tensor([[0, 0, 1], [0, 0, 1]])
-    class_num = 3
-    focal_loss(class_num, predict, target)
-    cross_entropy_error(predict, target1)
+    predict = torch.tensor([[1.2171, 1.5767, 0.9030, 0.8844, -0.5551],
+                            [-0.6737, -0.4417, -1.1523, -0.9431, 0.1386],
+                            [-1.0912, 0.3444, -0.9349, -0.1763, -0.7261]])
+    predict = torch.tensor([[0.1, 0.1, 0.8, 0.],  # p-easy
+                            [0.2, 0.2, 0.31, 0.29],  # p-hard
+                            [0.32, 0.28, 0.3101, 0.2899]])  # n
+    target = torch.tensor([2, 2, 0])  # 一个是第4类，一个是第3类，一个是第1类
+    # target1 = torch.tensor([[0, 0, 1], [0, 0, 1]])
+    class_num = 4
+    # print("focal loss: " + str(focal_loss(class_num, predict, target)))
+    print("focal loss1: " + str(focal_loss1(class_num, predict, target)))
+    print("cross entropy: " + str(cross_entropy_error(class_num, predict, target)))
+    print(F.cross_entropy(predict, target))

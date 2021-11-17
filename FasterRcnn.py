@@ -10,7 +10,7 @@ from torchvision.ops import MultiScaleRoIAlign
 from typing import List, Optional, Dict, Tuple
 from torchvision.ops.misc import FrozenBatchNorm2d
 
-from loss import smooth_l1_loss, fastrcnn_loss
+from loss import smooth_l1_loss, fastrcnn_loss, MultiCEFocalLoss
 from utils import LastLevelMaxPool, IntermediateLayerGetter, Matcher, BoxCoder, box_iou, _onnx_get_num_anchors_and_pre_nms_top_n,\
                             clip_boxes_to_image, batched_nms, remove_small_boxes, concat_box_prediction_layers, _resize_image_onnx, _resize_image,\
                             resize_boxes, ImageList, AnchorsGenerator
