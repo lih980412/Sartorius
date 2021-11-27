@@ -25,7 +25,7 @@ class Faster_DataSet(Dataset):
         thing_ids = [k["id"] for k in COCO_CATEGORIES if k["isthing"] == 1]
         assert len(thing_ids) == 80, len(thing_ids)
         self.thing_dataset_id_to_contiguous_id = {k: i for i, k in enumerate(thing_ids)}
-        thing_classes = [k["name"] for k in COCO_CATEGORIES if k["isthing"] == 1]
+        # thing_classes = [k["name"] for k in COCO_CATEGORIES if k["isthing"] == 1]
         ids = list(sorted(self.coco.imgs.keys()))
         self.ids = ids
 
