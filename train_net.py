@@ -564,21 +564,17 @@ def main(args):
     # train_set = Mask_DataSet(annotations_file, img_root, img_shape=(520, 704))
 
     # Faster
-
-
-
     file_root = args.data_path
-    train_annfile = os.path.join(file_root, "annotations", "instances_train2014.json")
-    val_annfile = os.path.join(file_root, "annotations", "instances_val2014.json")
     data_transform = {
         "train": transforms.Compose([transforms.ToTensor()]),
         "val": transforms.Compose([transforms.ToTensor()])
     }
-    train_set = Faster_DataSet(train_annfile, os.path.join(file_root, "coco", "train2014"), transform=data_transform["train"])
-    val_set = Faster_DataSet(val_annfile, os.path.join(file_root, "coco", "val2014"), transform=data_transform["val"])
-
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     batch_size = args.batch_size
+
+    # train_annfile = os.path.join(file_root, "annotations", "instances_train2014.json")
+    train_annfile = r"K:\Dataset\MS COCO 2014\instances_minival2014.json"
+    # train_set = Faster_DataSet(train_annfile, os.path.join(file_root, "coco", "train2014"), transform=data_transform["train"])
+    train_set = Faster_DataSet(train_annfile, os.path.join(file_root, "coco", "val2014"), transform=data_transform["train"])
     # 返回 index, items
     # 其中 index 是索引，items 包含了[imgs, target]
     # imgs: [batch_size, img_size, img_size, 3]
@@ -588,6 +584,9 @@ def main(args):
                                   shuffle=True,
                                   pin_memory=True,
                                   collate_fn=Faster_DataSet.collate_fn)
+
+    val_annfile = os.path.join(file_root, "annotations", "instances_val2014.json")
+    val_set = Faster_DataSet(val_annfile, os.path.join(file_root, "coco", "val2014"), transform=data_transform["val"])
     val_dataloader = DataLoader(val_set,
                                 batch_size,
                                 shuffle=True,
@@ -595,6 +594,8 @@ def main(args):
                                 collate_fn=Faster_DataSet.collate_fn
                                 )
 
+
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     model = create_model(args.num_classes + 1, "cuda")
     model.to(device)
 

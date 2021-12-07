@@ -530,12 +530,12 @@ class RegionProposalNetwork(torch.nn.Module):
         objectness, pred_bbox_deltas = self.head(features)
 
 
-        from vis_feature import vis_head_features
-        vis_head_features(objectness, 0, 0)
-        vis_head_features(objectness, 1, 0)
-        vis_head_features(objectness, 2, 0)
-        vis_head_features(objectness, 3, 0)
-        vis_head_features(objectness, 4, 0)
+        # from vis_feature import vis_head_features
+        # vis_head_features(objectness, 0, 0)
+        # vis_head_features(objectness, 1, 0)
+        # vis_head_features(objectness, 2, 0)
+        # vis_head_features(objectness, 3, 0)
+        # vis_head_features(objectness, 4, 0)
 
         # 生成一个batch图像的所有anchors信息,list(tensor)元素个数等于batch_size
         anchors = self.anchor_generator(images, features)

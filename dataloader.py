@@ -1,15 +1,130 @@
-
 import os
 import cv2
 import json
 import torch
+import itertools
 import numpy as np
 import pandas as pd
 from PIL import Image
-from coco_utils import COCO_CATEGORIES
+from coco_utils import COCO_CATEGORIES, DEFECT_CATEGORIES
 from pycocotools.coco import COCO
 from torch.utils.data import Dataset
 
+
+class Demo_Defect_DataSet(Dataset):
+    def __init__(self, img_dir, annotations_file, transform=None):
+        super(Demo_Defect_DataSet, self).__init__()
+        self.img_dir = img_dir
+        self.transform = transform
+        self.coco = COCO(annotations_file)
+
+        thing_ids = [k["id"] for k in DEFECT_CATEGORIES if k["isthing"] == 1]
+        assert len(thing_ids) == 5, len(thing_ids)
+        self.thing_dataset_id_to_contiguous_id = {k: i for i, k in enumerate(thing_ids)}
+
+        ids = list(sorted(self.coco.imgs.keys()))
+        self.ids = ids
+
+    def __len__(self):
+        return len(self.ids)
+
+    def __getitem__(self, idx):  # 这里的 idx 是这个 epoch 内图片的序号
+        coco = self.coco
+        img_id = self.ids[idx]
+        img_name = coco.loadImgs([img_id])[0]["file_name"]
+        img_path = os.path.join(self.img_dir, img_name)
+        img = Image.open(img_path).convert("RGB")
+
+        ann_id = coco.getAnnIds(imgIds=[img_id])
+        img_ann = [obj for obj in coco.loadAnns(ann_id) if obj["iscrowd"] == 0]
+        target = {}
+        boxes = []
+        for obj in img_ann:
+            if obj["bbox"][2] > 0 and obj["bbox"][3] > 0:
+                boxes.append(obj["bbox"])
+        boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
+        boxes[:, 2:] += boxes[:, :2]
+        # 这两句与上面一句等价
+        # boxes[:, 2] = boxes[:, 0] + boxes[:, 2]
+        # boxes[:, 3] = boxes[:, 1] + boxes[:, 3]
+        w, h = img.size
+        if (w is not None) and (h is not None):
+            boxes[:, 0::2].clamp_(min=0, max=w)
+            boxes[:, 1::2].clamp_(min=0, max=h)
+        target["boxes"] = boxes
+
+        classes = [self.thing_dataset_id_to_contiguous_id[obj["category_id"]] for obj in img_ann]
+        classes = torch.as_tensor(classes, dtype=torch.int64)
+        target["labels"] = classes
+        target["image_id"] = torch.as_tensor([int(img_id)])
+        target["area"] = torch.as_tensor([obj["area"] for obj in img_ann])
+        target["iscrowd"] = torch.as_tensor([obj["iscrowd"] for obj in img_ann])
+        if self.transform is not None:
+            img, target = self.transform(img, target)
+
+        return img, target
+
+    @staticmethod
+    def collate_fn(batch):
+        return tuple(zip(*batch))
+
+
+class Demo_DataSet(Dataset):
+    def __init__(self, img_dir, annotations_file, transform=None):
+        super(Demo_DataSet, self).__init__()
+        self.img_dir = img_dir
+        self.transform = transform
+        self.coco = COCO(annotations_file)
+
+        thing_ids = [k["id"] for k in COCO_CATEGORIES if k["isthing"] == 1]
+        assert len(thing_ids) == 80, len(thing_ids)
+        self.thing_dataset_id_to_contiguous_id = {k: i for i, k in enumerate(thing_ids)}
+
+        ids = list(sorted(self.coco.imgs.keys()))
+        self.ids = ids
+
+    def __len__(self):
+        return len(self.ids)
+
+    def __getitem__(self, idx):  # 这里的 idx 是这个 epoch 内图片的序号
+        coco = self.coco
+        img_id = self.ids[idx]
+        img_name = coco.loadImgs(img_id)[0]["file_name"]
+        img_path = os.path.join(self.img_dir, img_name)
+        img = Image.open(img_path).convert("RGB")
+
+        ann_id = coco.getAnnIds(imgIds=img_id)
+        img_ann = [obj for obj in coco.loadAnns(ann_id) if obj["iscrowd"] == 0]
+        target = {}
+        boxes = []
+        for obj in img_ann:
+            if obj["bbox"][2] > 0 and obj["bbox"][3] > 0:
+                boxes.append(obj["bbox"])
+        boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
+        boxes[:, 2:] += boxes[:, :2]
+        # 这两句与上面一句等价
+        # boxes[:, 2] = boxes[:, 0] + boxes[:, 2]
+        # boxes[:, 3] = boxes[:, 1] + boxes[:, 3]
+        w, h = img.size
+        if (w is not None) and (h is not None):
+            boxes[:, 0::2].clamp_(min=0, max=w)
+            boxes[:, 1::2].clamp_(min=0, max=h)
+        target["boxes"] = boxes
+
+        classes = [self.thing_dataset_id_to_contiguous_id[obj["category_id"]] for obj in img_ann]
+        classes = torch.as_tensor(classes, dtype=torch.int64)
+        target["labels"] = classes
+        target["image_id"] = torch.as_tensor([img_id])
+        target["area"] = torch.as_tensor([obj["area"] for obj in img_ann])
+        target["iscrowd"] = torch.as_tensor([obj["iscrowd"] for obj in img_ann])
+        if self.transform is not None:
+            img, target = self.transform(img, target)
+
+        return img, target
+
+    @staticmethod
+    def collate_fn(batch):
+        return tuple(zip(*batch))
 
 
 
@@ -72,7 +187,6 @@ class Faster_DataSet(Dataset):
         return tuple(zip(*batch))
 
 
-
 class Mask_DataSet(Dataset):
     def __init__(self, annotations_file, img_dir, transform=None, target_transform=None, img_shape=None):
         super(Mask_DataSet, self).__init__()
@@ -122,7 +236,6 @@ def rle_decode(mask_rle, shape, color=1):
     for lo, hi in zip(starts, ends):
         img_de[lo: hi] = color
     return img_de.reshape(shape)
-
 
 # if __name__ == "__main__":
 #     annotations_file = "K:\\LiHang\\Cell Instance Segmentation\\train_3.csv"

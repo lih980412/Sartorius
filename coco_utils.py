@@ -15,6 +15,14 @@ from pycocotools.cocoeval import COCOeval
 from collections import defaultdict, deque
 
 
+DEFECT_CATEGORIES = [
+    {"color": [220, 20, 60], "isthing": 1, "id": 1, "name": "round"},
+    {"color": [119, 11, 32], "isthing": 1, "id": 2, "name": "crack"},
+    {"color": [0, 0, 142], "isthing": 1, "id": 3, "name": "icf"},
+    {"color": [0, 0, 230], "isthing": 1, "id": 4, "name": "lop"},
+    {"color": [106, 0, 228], "isthing": 1, "id": 5, "name": "bar"},
+]
+
 COCO_CATEGORIES = [
     {"color": [220, 20, 60], "isthing": 1, "id": 1, "name": "person"},
     {"color": [119, 11, 32], "isthing": 1, "id": 2, "name": "bicycle"},

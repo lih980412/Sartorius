@@ -41,9 +41,9 @@ if __name__ == "__main__":
     mask = (mask*255).astype(np.uint8)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    cv2.drawContours(img, contours, -1, (128, 0, 128), 1)
+    cv2.drawContours(img, contours, -1, (250, 250, 250), 1)
     # img = img[:, :, ::-1]   # BGR 转成 RGB
-    img[..., 0] = np.where(mask == 255, 150, img[..., 0])
+    img[..., 0] = np.where(mask == 255, 255, img[..., 1])
     cv2.imshow("mask_Img", img)
     cv2.waitKey(0)
 
