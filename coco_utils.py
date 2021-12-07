@@ -406,20 +406,13 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch,
     return mloss, now_lr
 
 @torch.no_grad()
-def evaluate(model, data_loader, device):
-    n_threads = torch.get_num_threads()
-    # FIXME remove this and make paste_masks_in_image run on the GPU
-    torch.set_num_threads(1)
-    cpu_device = torch.device("cpu")
-    model.eval()
-    metric_logger = MetricLogger(delimiter="  ")
-    header = "Test: "
+def evaluate(model, data_loader, device, val_acc):
 
     coco = get_coco_api_from_dataset(data_loader.dataset)
     iou_types = _get_iou_types(model)
     coco_evaluator = CocoEvaluator(coco, iou_types)
 
-    for image, targets in metric_logger.log_every(data_loader, 100, header):
+    for image, targets in enumerate(data_loader):
         image = list(img.to(device) for img in image)
 
         # 当使用CPU时，跳过GPU相关指令
@@ -429,7 +422,7 @@ def evaluate(model, data_loader, device):
         model_time = time.time()
         outputs = model(image)
 
-        outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
+        outputs = [{k: v.to(device) for k, v in t.items()} for t in outputs]
         model_time = time.time() - model_time
 
         res = {target["image_id"].item(): output for target, output in zip(targets, outputs)}
@@ -437,17 +430,16 @@ def evaluate(model, data_loader, device):
         evaluator_time = time.time()
         coco_evaluator.update(res)
         evaluator_time = time.time() - evaluator_time
-        metric_logger.update(model_time=model_time, evaluator_time=evaluator_time)
+        # metric_logger.update(model_time=model_time, evaluator_time=evaluator_time)
 
     # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
+    # metric_logger.synchronize_between_processes()
+    # print("Averaged stats:", metric_logger)
     coco_evaluator.synchronize_between_processes()
 
     # accumulate predictions from all images
     coco_evaluator.accumulate()
     coco_evaluator.summarize()
-    torch.set_num_threads(n_threads)
 
     coco_info = coco_evaluator.coco_eval[iou_types[0]].stats.tolist()  # numpy to list
 
@@ -841,50 +833,3 @@ def merge(img_ids, eval_imgs):
 
     return merged_img_ids, merged_eval_imgs
 
-
-def evaluate(self):
-    '''
-    Run per image evaluation on given images and store results (a list of dict) in self.evalImgs
-    :return: None
-    '''
-    # tic = time.time()
-    # print('Running per image evaluation...')
-    p = self.params
-    # add backward compatibility if useSegm is specified in params
-    if p.useSegm is not None:
-        p.iouType = 'segm' if p.useSegm == 1 else 'bbox'
-        print('useSegm (deprecated) is not None. Running {} evaluation'.format(p.iouType))
-    # print('Evaluate annotation type *{}*'.format(p.iouType))
-    p.imgIds = list(np.unique(p.imgIds))
-    if p.useCats:
-        p.catIds = list(np.unique(p.catIds))
-    p.maxDets = sorted(p.maxDets)
-    self.params = p
-
-    self._prepare()
-    # loop through images, area range, max detection number
-    catIds = p.catIds if p.useCats else [-1]
-
-    if p.iouType == 'segm' or p.iouType == 'bbox':
-        computeIoU = self.computeIoU
-    elif p.iouType == 'keypoints':
-        computeIoU = self.computeOks
-    self.ious = {
-        (imgId, catId): computeIoU(imgId, catId)
-        for imgId in p.imgIds
-        for catId in catIds}
-
-    evaluateImg = self.evaluateImg
-    maxDet = p.maxDets[-1]
-    evalImgs = [
-        evaluateImg(imgId, catId, areaRng, maxDet)
-        for catId in catIds
-        for areaRng in p.areaRng
-        for imgId in p.imgIds
-    ]
-    # this is NOT in the pycocotools code, but could be done outside
-    evalImgs = np.asarray(evalImgs).reshape(len(catIds), len(p.areaRng), len(p.imgIds))
-    self._paramsEval = copy.deepcopy(self.params)
-    # toc = time.time()
-    # print('DONE (t={:0.2f}s).'.format(toc-tic))
-    return p.imgIds, evalImgs

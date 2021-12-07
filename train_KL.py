@@ -6,7 +6,7 @@ import os, sys, math
 import torch.nn.functional as F
 from utils import euclidean_dist
 from train_net import create_model
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, sampler
 from coco_utils import warmup_lr_scheduler, evaluate
 from sklearn.manifold._t_sne import _joint_probabilities
 from dataloader import Demo_DataSet, Demo_Defect_DataSet
@@ -79,86 +79,6 @@ def KL(fea_kl, fea):
     # kl_mean = F.kl_div(Q, P, reduction='mean')
     return loss
 
-# def main_kl(cfg):
-#     data_transform = {
-#         "train": transforms.Compose([transforms.ToTensor()]),
-#         "val": transforms.Compose([transforms.ToTensor])
-#     }
-#     train_file = cfg.train_dir
-#     train_ann = os.path.join(cfg.ann_dir, "instances_minival2014.json")
-#     train_set = Demo_DataSet(train_file, train_ann, data_transform["train"])
-#     # val_file = os.path.join(cfg.val_dir)
-#     # val_ann = os.path.join(cfg.ann_dir, "instances_val2014.json")
-#     # val_set = Demo_DataSet(val_file, val_ann, data_transform)
-#
-#     defect_file = cfg.defect_dir
-#     defect_ann = os.path.join(cfg.defect_ann_dir, "instances_val.json")
-#     train_defect_set = Demo_Defect_DataSet(defect_file, defect_ann, data_transform["train"])
-#
-#     batch_size = cfg.batch_size
-#     train_dataloader = DataLoader(train_set,
-#                                   batch_size,
-#                                   shuffle=True,
-#                                   collate_fn=Demo_DataSet.collate_fn,
-#                                   pin_memory=True)
-#     defect_dataloader = DataLoader(train_defect_set,
-#                                    batch_size,
-#                                    shuffle=True,
-#                                    collate_fn=Demo_DataSet.collate_fn,
-#                                    pin_memory=True)
-#     device = torch.device(cfg.device) if torch.cuda.is_available() else "cpu"
-#
-#     model_kl = create_KLmodel(cfg.num_classes + 1, device)
-#     model_kl.to(device)
-#     params_kl = [p for p in model_kl.parameters() if p.requires_grad]
-#     optimizer_kl = torch.optim.SGD(params_kl, lr=0.005, momentum=0.9, weight_decay=0.0005)
-#     lr_scheduler_kl = torch.optim.lr_scheduler.MultiStepLR(optimizer_kl, milestones=[16, 22], gamma=0.1)
-#
-#     train_loss = []
-#     kl_loss = []
-#     # learning_rate = []
-#     # val_map = []
-#
-#     for epoch in range(cfg.epoch):
-#         # loss = train_one_epoch(model, model_kl, optimizer, optimizer_kl, train_dataloader, defect_dataloader, device, epoch)
-#
-#         loss = train_one_epoch_kl(model_kl, optimizer_kl, train_dataloader, defect_dataloader, device, epoch)
-#
-#
-# def train_one_epoch_kl(model_kl, optimizer_kl, train_dataloader, defect_dataloader, device, epoch, warmup=True):
-#     model_kl.train()
-#     if epoch == 0 and warmup is True:  # 当训练第一轮（epoch=0）时，启用warmup训练方式，可理解为热身训练
-#         warmup_factor = 1.0 / 1000
-#         warmup_iters = min(1000, len(defect_dataloader) - 1)
-#         lr_scheduler_kl = warmup_lr_scheduler(optimizer_kl, warmup_iters, warmup_factor)
-#     for i, ([images, targets], [def_images, def_targets]) in enumerate(zip(train_dataloader, defect_dataloader)):
-#         shapes, imageS, def_imgs = [], [], []
-#         for image in images:
-#             image = image.to(device)
-#             shapes.append([image.size()])  # (C, H, W)
-#             imageS.append(image)
-#         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-#         def_images = list(image.to(device) for image in def_images)
-#         deF_images = []
-#         for (image, shape) in zip(def_images, shapes):
-#             resize_transform = transforms.Resize(image.shape[1], image.shape[2], shape)
-#             deF_images.append(torch.as_tensor(resize_transform.apply_image(image), device="cuda"))
-#         del def_images
-#         # feature map
-#         fea_kl = model_kl(deF_images)
-#         temp = fea_kl["2"][0].permute(1, 2, 0).reshape(-1, 256)
-#         # 计算各样本间距离，特征图上的每点作为一个样本，第三个通道的256维作为样本特征
-#         distance = euclidean_dist(temp, temp)
-#         # 计算联合分布
-#         distance_np = np.asarray(distance.detach().cpu())
-#         P = _joint_probabilities(distances=distance_np, desired_perplexity=25., verbose=False)
-#         P = torch.tensor(P, dtype=torch.float32, device="cuda")
-#         # 归一化
-#         P = F.softmax(P, dim=0)
-#         kl_mean = F.kl_div(log_a, P, reduction='mean')
-#         print(fea_kl)
-#         # fea, loss_dict = model(imageS, targets)
-
 
 def train_one_epoch(model, model_kl, optimizer, optimizer_kl, train_dataloader, defect_dataloader, device, epoch,
                     warmup=True):
@@ -228,14 +148,16 @@ def main(cfg):
     train_defect_set = Demo_Defect_DataSet(defect_file, defect_ann, data_transform["train"])
 
     batch_size = cfg.batch_size
+    train_sampler = sampler.RandomSampler(data_source=train_set, replacement=True)
     train_dataloader = DataLoader(train_set,
                                   batch_size,
-                                  shuffle=True,
+                                  sampler=train_sampler,
                                   collate_fn=Demo_DataSet.collate_fn,
                                   pin_memory=True)
+    defect_sampler = sampler.RandomSampler(data_source=train_defect_set, replacement=True)
     defect_dataloader = DataLoader(train_defect_set,
                                    batch_size,
-                                   shuffle=True,
+                                   sampler=defect_sampler,
                                    collate_fn=Demo_DataSet.collate_fn,
                                    pin_memory=True)
 
@@ -270,7 +192,8 @@ def main(cfg):
         lr_scheduler_kl.step()
 
         # evaluate on the test dataset
-        coco_info = evaluate(model, val_dataloader, device=device)
+        val_acc = []
+        coco_info = evaluate(model, val_dataloader, device=device, val_acc)
         print("----------------------evaluate--------------------------------")
         print(coco_info[1])
         print("--------------------------------------------------------------")
