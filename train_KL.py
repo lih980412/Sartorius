@@ -19,17 +19,17 @@ def parse():
     '''data'''
     # for quick
     # parser.add_argument('--train_dir', type=str, default=r"K:\Dataset\MS COCO 2014\coco\train2014", help="train data location")
-    parser.add_argument('--train_dir', type=str, default=r"K:\Dataset\MS COCO 2014\coco\train2014",
+    parser.add_argument('--train_dir', type=str, default=r"F:\Dataset\MS COCO 2014\coco\train2014",
                         help="train data location")
-    parser.add_argument('--val_dir', type=str, default=r"K:\Dataset\MS COCO 2014\coco\val2014",
+    parser.add_argument('--val_dir', type=str, default=r"F:\Dataset\MS COCO 2014\coco\val2014",
                         help="val data location")
-    parser.add_argument('--ann_dir', type=str, default=r"K:\Dataset\MS COCO 2014")
-    parser.add_argument('--defect_dir', type=str, default=r"J:\Beijing\FSCE-1\datasets\my_dataset\image",
+    parser.add_argument('--ann_dir', type=str, default=r"F:\Dataset\MS COCO 2014\annotations")
+    parser.add_argument('--defect_dir', type=str, default=r"D:\UserD\Li\FSCE-1\datasets\my_dataset\image",
                         help="defect data location")
-    parser.add_argument('--defect_ann_dir', type=str, default=r"J:\Beijing\FSCE-1\datasets\my_dataset\annotations")
+    parser.add_argument('--defect_ann_dir', type=str, default=r"D:\UserD\Li\FSCE-1\datasets\my_dataset\annotations")
     '''hyper-param'''
     parser.add_argument('--weights', type=str, default="", help="model weights")
-    parser.add_argument('--batch_size', type=int, default=1, help="batch size")
+    parser.add_argument('--batch_size', type=int, default=2, help="batch size")
     parser.add_argument('--device', type=str, default="cuda")
     parser.add_argument('--num_classes', type=str, default=80, help="the number of dataset's category")
     parser.add_argument('--epoch', type=int, default=2)
@@ -45,6 +45,15 @@ def create_KLmodel(min_sizes=800, max_sizes=1333, image_mean=[0.485, 0.456, 0.40
 
     return backbone
 
+
+def KL_Fea(fea_kl, fea):
+    temp = fea["2"].permute(2, 3, 0, 1).reshape(-1, 256).clamp(min=1e-09, max=1e+09)
+    temp_kl = fea_kl["2"].permute(2, 3, 0, 1).reshape(-1, 256).clamp(min=1e-09, max=1e+09)
+    # P = F.softmax(temp, dim=1)
+    # Q = F.log_softmax(temp_kl, dim=1)
+    kl_loss = torch.nn.KLDivLoss()
+    loss = kl_loss(temp.log(), temp_kl)
+    return loss
 
 def KL(fea_kl, fea):
     temp = fea["2"][0].permute(1, 2, 0).reshape(-1, 256)
@@ -63,8 +72,12 @@ def KL(fea_kl, fea):
     P = F.softmax(P, dim=0)
     Q = F.log_softmax(Q, dim=0)
     '''计算损失'''
-    kl_mean = F.kl_div(Q, P, reduction='mean')
-    return kl_mean
+
+    kl_loss = torch.nn.KLDivLoss()
+    loss = kl_loss(P, Q)
+
+    # kl_mean = F.kl_div(Q, P, reduction='mean')
+    return loss
 
 # def main_kl(cfg):
 #     data_transform = {
@@ -157,7 +170,6 @@ def train_one_epoch(model, model_kl, optimizer, optimizer_kl, train_dataloader, 
         lr_scheduler = warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
         lr_scheduler_kl = warmup_lr_scheduler(optimizer_kl, warmup_iters, warmup_factor)
     mloss = torch.zeros(1).to(device)  # mean losses
-    mloss_kl = torch.zeros(1).to(device)
     for i, ([images, targets], [def_images, def_targets]) in enumerate(zip(train_dataloader, defect_dataloader)):
         shapes, imageS, def_imgs = [], [], []
         for image in images:
@@ -176,34 +188,28 @@ def train_one_epoch(model, model_kl, optimizer, optimizer_kl, train_dataloader, 
         # feature map
         fea_kl = model_kl(deF_images)
         fea, loss_dict = model(imageS, targets)
-        loss_kl = KL(fea_kl, fea)
+        loss_kl = KL_Fea(fea_kl, fea)
         losses = sum(loss for loss in loss_dict.values())
 
-        losses_kl = losses + loss_kl
+        losses_kl = losses + torch.abs(loss_kl)
         loss_value = losses_kl.item()
         if not math.isfinite(loss_value):  # 当计算的损失为无穷大时停止训练
             print("Loss is {}, stopping training".format(loss_value))
             print(loss_value)
             sys.exit(1)
-        mloss = (mloss * i + losses.item()) / (i + 1)
-        mloss_kl = (mloss_kl * i + loss_kl.item()) / (i + 1)
+        mloss = (mloss * i + losses_kl.item()) / (i + 1)
 
         optimizer.zero_grad()
-        losses.backward()
+        losses_kl.backward()
         optimizer.step()
         now_lr = optimizer.param_groups[0]["lr"]
 
-        optimizer_kl.zero_grad()
-        loss_kl.backward()
-        optimizer_kl.step()
-        now_lr_kl = optimizer.param_groups[0]["lr"]
-
         if lr_scheduler is not None:  # 第一轮使用warmup训练方式
             lr_scheduler.step()
-        print("epoch: " + str(epoch).zfill(4) + ", iter: " + str(i).zfill(6) + ", total loss: " + str('%.3f' % loss_value).zfill(7)+ ", loss: " + str('%.3f' % losses.item()).zfill(7) + \
-              ", kl_loss: " + str('%.3f' % loss_kl.item()).zfill(7) + ", lr: " + str('%.8f' % now_lr).zfill(7) + ", kl_lr: " + str('%.8f' % now_lr_kl).zfill(7))
+        print("epoch: " + str(epoch).zfill(4) + ", iter: " + str(i).zfill(6) + ", total loss: " + str('%.5f' % loss_value).zfill(7)+ ", loss: " + str('%.5f' % losses.item()).zfill(7) + \
+              ", kl_loss: " + str('%.5f' % loss_kl.item()).zfill(7) + ", lr: " + str('%.8f' % now_lr).zfill(7))
 
-    return mloss, mloss_kl, now_lr, now_lr_kl
+    return mloss, now_lr
 
 
 def main(cfg):
@@ -212,13 +218,13 @@ def main(cfg):
         "val": transforms.Compose([transforms.ToTensor])
     }
     train_file = cfg.train_dir
-    train_ann = os.path.join(cfg.ann_dir, "instances_minival2014.json")
+    train_ann = os.path.join(cfg.ann_dir, "instances_train2014.json")
     train_set = Demo_DataSet(train_file, train_ann, data_transform["train"])
     val_file = cfg.val_dir
     val_ann = os.path.join(cfg.ann_dir, "instances_val2014.json")
     val_set = Demo_DataSet(val_file, val_ann, data_transform["val"])
     defect_file = cfg.defect_dir
-    defect_ann = os.path.join(cfg.defect_ann_dir, "instances_val.json")
+    defect_ann = os.path.join(cfg.defect_ann_dir, "instances_train.json")
     train_defect_set = Demo_Defect_DataSet(defect_file, defect_ann, data_transform["train"])
 
     batch_size = cfg.batch_size
@@ -255,23 +261,19 @@ def main(cfg):
     train_loss, kl_loss = [], []
     train_lr, kl_lr = [], []
 
-    # val_map = []
-
     for epoch in range(cfg.epoch):
-        loss, loss_kl, lr, lr_kl = train_one_epoch(model, model_kl, optimizer, optimizer_kl, train_dataloader, defect_dataloader, device, epoch)
+        loss, lr = train_one_epoch(model, model_kl, optimizer, optimizer_kl, train_dataloader, defect_dataloader, device, epoch)
         train_loss.append(loss.item())
-        kl_loss.append(loss_kl.item())
         train_lr.append(lr)
-        kl_lr.append(lr_kl)
 
         lr_scheduler.step()
         lr_scheduler_kl.step()
 
         # evaluate on the test dataset
         coco_info = evaluate(model, val_dataloader, device=device)
-        print("evaluate--------------------------------")
+        print("----------------------evaluate--------------------------------")
         print(coco_info[1])
-        print("----------------------------------------")
+        print("--------------------------------------------------------------")
         # # write into txt
         # with open(results_file, "a") as f:
         #     # 写入的数据包括coco指标还有loss和learning rate

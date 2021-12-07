@@ -41,7 +41,7 @@ def fastrcnn_loss(class_logits, box_regression, labels, regression_targets):
     # 计算类别损失信息
 
     # classification_loss = F.cross_entropy(class_logits, labels)
-    classification_loss = MultiCEFocalLoss(class_logits, labels, class_num=80, alpha=0.25, gamma=2)
+    classification_loss = MultiCEFocalLoss(class_logits, labels, class_num=81, alpha=0.25, gamma=2)
 
     # get indices that correspond to the regression targets for
     # the corresponding ground truth labels, to be used with
