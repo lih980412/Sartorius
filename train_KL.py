@@ -182,7 +182,7 @@ def main(cfg):
 
     train_loss, kl_loss = [], []
     train_lr, kl_lr = [], []
-
+    val = []
     for epoch in range(cfg.epoch):
         loss, lr = train_one_epoch(model, model_kl, optimizer, optimizer_kl, train_dataloader, defect_dataloader, device, epoch)
         train_loss.append(loss.item())
@@ -193,18 +193,18 @@ def main(cfg):
 
         # evaluate on the test dataset
         val_acc = []
-        coco_info = evaluate(model, val_dataloader, device=device, val_acc)
+        coco_info = evaluate(model, val_dataloader, device=device, val_acc=val_acc)
         print("----------------------evaluate--------------------------------")
         print(coco_info[1])
         print("--------------------------------------------------------------")
-        # # write into txt
+        # write into txt
         # with open(results_file, "a") as f:
         #     # 写入的数据包括coco指标还有loss和learning rate
         #     result_info = [str(round(i, 4)) for i in coco_info + [mean_loss.item()]] + [str(round(lr, 6))]
         #     txt = "epoch:{} {}".format(epoch, '  '.join(result_info))
         #     f.write(txt + "\n")
-        #
-        # val_map.append(coco_info[1])  # pascal mAP
+
+        val.append(coco_info)  # pascal mAP
 
         # save weights
         save_files = {
