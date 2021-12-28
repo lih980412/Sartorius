@@ -6,9 +6,12 @@ import itertools
 import numpy as np
 import pandas as pd
 from PIL import Image
-from coco_utils import COCO_CATEGORIES, DEFECT_CATEGORIES
+# from PIL import ImageFile
 from pycocotools.coco import COCO
 from torch.utils.data import Dataset
+# ImageFile.LOAD_TRUNCATED_IMAGES = True
+from coco_utils import COCO_CATEGORIES, DEFECT_CATEGORIES
+
 
 
 class Demo_Defect_DataSet(Dataset):
@@ -77,9 +80,9 @@ class Demo_DataSet(Dataset):
         self.coco = COCO(annotations_file)
 
         thing_ids = [k["id"] for k in COCO_CATEGORIES if k["isthing"] == 1]
+        # thing_ornot_ids = [k["id"] for k in COCO_CATEGORIES]
         assert len(thing_ids) == 80, len(thing_ids)
         self.thing_dataset_id_to_contiguous_id = {k: i for i, k in enumerate(thing_ids)}
-
         ids = list(sorted(self.coco.imgs.keys()))
         self.ids = ids
 

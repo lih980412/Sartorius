@@ -1,3 +1,4 @@
+import os.path
 import sys
 import copy
 import json
@@ -405,26 +406,84 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch,
 
     return mloss, now_lr
 
+
 @torch.no_grad()
-def evaluate(model, data_loader, device):
+def evaluate_kl(model, data_loader, device, save_dir, epoch):
     cpu_device = torch.device("cpu")
     model.eval()
 
-    coco91to80 = data_loader.dataset.coco91to80
-    coco80to91 = dict([(str(v), k) for k, v in coco91to80.items()])
     results = []
-    for image, targets in enumerate(data_loader):
+    for i, (image, targets) in enumerate(data_loader):
+        image = list(img.to(device) for img in image)
+        outputs = model(image)
+        outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
+
+        # 遍历每张图像的预测结果
+        for target, output in zip(targets, outputs):
+            if len(output) == 0:
+                continue
+
+            img_id = int(target["image_id"])
+            per_image_boxes = output["boxes"]
+            # 对于coco_eval, 需要的每个box的数据格式为[x_min, y_min, w, h]
+            # 而我们预测的box格式是[x_min, y_min, x_max, y_max]，所以需要转下格式
+            per_image_boxes[:, 2:] -= per_image_boxes[:, :2]
+            per_image_classes = output["labels"]
+            per_image_scores = output["scores"]
+
+            # 遍历每个目标的信息
+            for object_score, object_class, object_box in zip(per_image_scores, per_image_classes, per_image_boxes):
+                object_score = float(object_score)
+                object_box = [round(b, 2) for b in object_box.tolist()]
+
+                res = {"image_id": str(img_id),
+                       "category_id": int(object_class),
+                       "bbox": object_box,
+                       "score": round(object_score, 3)}
+                results.append(res)
+
+    json_str = json.dumps(results, indent=4)
+    file_name = os.path.join(save_dir, "json_coco", "result_" + str(epoch).zfill(4) + ".json")
+
+    # with open("./predict_result/coco_json/result_" + str(timestamp) + ".json", 'w') as json_file:
+    with open(file_name, "w") as json_file:
+        json_file.write(json_str)
+
+    # accumulate predictions from all images
+    coco_true = data_loader.dataset.coco
+    coco_pre = coco_true.loadRes(file_name)
+
+    coco_evaluator = COCOeval(cocoGt=coco_true, cocoDt=coco_pre, iouType="bbox")
+    coco_evaluator.evaluate()
+    coco_evaluator.accumulate()
+    coco_evaluator.summarize()
+
+    coco_info = coco_evaluator.stats.tolist()  # numpy to list
+
+    return coco_info
+
+
+
+
+@torch.no_grad()
+def evaluate(model, data_loader, device, save_dir, epoch, checkpoint_epoch):
+    cpu_device = torch.device("cpu")
+    model.eval()
+
+    coco91to80 = data_loader.dataset.thing_dataset_id_to_contiguous_id
+    # coco80to91 = dict([(str(v), k) for k, v in coco91to80.items()])
+    # coco80to91 = data_loader.dataset.contiguous_id_to_thing_dataset_id
+    coco80to91 = {str(i): str(k) for i, k in enumerate(coco91to80)}
+
+    results = []
+    for i, (image, targets) in enumerate(data_loader):
         image = list(img.to(device) for img in image)
 
         # # 当使用CPU时，跳过GPU相关指令
         # if device != torch.device("cpu"):
         #     torch.cuda.synchronize(device)
-
-        model_time = time.time()
         outputs = model(image)
-
         outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
-        model_time = time.time() - model_time
 
         # 遍历每张图像的预测结果
         for target, output in zip(targets, outputs):
@@ -448,14 +507,11 @@ def evaluate(model, data_loader, device):
                 # We recommend rounding coordinates to the nearest tenth of a pixel
                 # to reduce resulting JSON file size.
                 object_box = [round(b, 2) for b in object_box.tolist()]
-
                 res = {"image_id": img_id,
                        "category_id": coco91_class,
                        "bbox": object_box,
                        "score": round(object_score, 3)}
                 results.append(res)
-
-
 
     # # gather the stats from all processes
     # metric_logger.synchronize_between_processes()
@@ -472,12 +528,16 @@ def evaluate(model, data_loader, device):
 
     # write predict results into json file
     json_str = json.dumps(results, indent=4)
-    with open('predict_tmp.json', 'w') as json_file:
+    if checkpoint_epoch:
+        file_name = os.path.join(save_dir, "json_coco", "result_" + str(epoch + checkpoint_epoch).zfill(4) + ".json")
+    else:
+        file_name = os.path.join(save_dir, "json_coco", "result_" + str(epoch).zfill(4) + ".json")
+    with open(file_name, 'w') as json_file:
         json_file.write(json_str)
 
     # accumulate predictions from all images
     coco_true = data_loader.dataset.coco
-    coco_pre = coco_true.loadRes('predict_tmp.json')
+    coco_pre = coco_true.loadRes(file_name)
 
     coco_evaluator = COCOeval(cocoGt=coco_true, cocoDt=coco_pre, iouType="bbox")
     coco_evaluator.evaluate()
@@ -489,7 +549,6 @@ def evaluate(model, data_loader, device):
     #     coco_info = None
 
     return coco_info
-
 
 # @torch.no_grad()
 # def evaluate(model, data_loader, device, val_acc):

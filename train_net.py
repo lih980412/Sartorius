@@ -20,7 +20,7 @@ def create_model(num_classes, device):
     # 如果GPU显存很大可以设置比较大的batch_size就可以将norm_layer设置为普通的BatchNorm2d
     # trainable_layers包括['layer4', 'layer3', 'layer2', 'layer1', 'conv1']， 5代表全部训练
     backbone = resnet50_fpn_backbone(norm_layer=torch.nn.BatchNorm2d,
-                                     trainable_layers=3)
+                                     trainable_layers=4)
     # 训练自己数据集时不要修改这里的91，修改的是传入的num_classes参数
     model = FasterRCNN(backbone=backbone, num_classes=91)
     # model = MaskRCNN(backbone=backbone, num_classes=91)
