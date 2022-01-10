@@ -121,7 +121,7 @@ def get_random_data1(annotation_line, input_shape=None, random=True, hue=.1, sat
     place_y = [0, int(h * min_offset_y), int(w * min_offset_y), 0]
 
     for i in range(0, 4):
-        box[i][:, [2]] = box[i][:, [0]] + box[i][:, [2]]
+        box[i][:, [2]] = box[i][:, [0]] + box[i][:, [2]]    # (x, y, w, h) 变为 (x, y, x, y)
         box[i][:, [3]] = box[i][:, [1]] + box[i][:, [3]]
         image_name = p_images[i]["file_name"]
 
@@ -137,7 +137,7 @@ def get_random_data1(annotation_line, input_shape=None, random=True, hue=.1, sat
         #                        (0, 255, 255), 2)
         for j in range(len(box[i])):
             image1 = cv2.rectangle(image1, (box[i][j][0], box[i][j][1]), (box[i][j][2], box[i][j][3]), (0, 255, 255), 2)
-        cv2.imshow("draw" + str(i), image1)
+        # cv2.imshow("draw" + str(i), image1)
 
         # 图片的大小
         iw, ih = image.size
@@ -313,7 +313,7 @@ def Cutmix(image_batch, alpha=1.0):
 
 if __name__ == "__main__":
     '''PIL'''
-    # img = Image.open(r'C:\Users\lenovo\Desktop\Li\A-3.png').convert("RGB")
+    # img = Image.open(r'J:\Data\20210325现场数据（已裁剪）\JPEGImages\Threepeople_bar6.jpg').convert("RGB")
     'Resize'
     # new_img = transforms.Resize((100, 200))(img)
     'Crop'
@@ -330,12 +330,12 @@ if __name__ == "__main__":
     # img = cv2.imread(r'C:\Users\lenovo\Desktop\Li\A-3.png')
     # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     'Mosaic'
-    # ann_path = r"J:\Beijing\FSCE_1\datasets\my_dataset\annotations\instances_val.json"
-    # image_root = r"J:\Beijing\FSCE_1\datasets\my_dataset\image"
-    # new_img = Mosaic(ann_path, image_root)
-    'Mixup'
+    ann_path = r"J:\Beijing\FSCE_1\datasets\my_dataset\annotations\instances_train.json"
     image_root = r"J:\Beijing\FSCE_1\datasets\my_dataset\image"
-    new_img = Mixup(image_root)
+    new_img = Mosaic(ann_path, image_root)
+    'Mixup'
+    # image_root = r"J:\Beijing\FSCE_1\datasets\my_dataset\image"
+    # new_img = Mixup(image_root)
     'Cutmix'
     # new_img = Cutmix()
 
